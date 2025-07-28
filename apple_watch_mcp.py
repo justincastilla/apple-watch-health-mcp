@@ -6,23 +6,28 @@ A Model Context Protocol server for querying Apple HealthKit step data stored in
 Author: Alex Salgado
 """
 import os
-from typing import Any, Optional
 import json
+from dotenv import load_dotenv
+
 from datetime import datetime
 from pydantic import BaseModel, field_validator, ValidationError
-from mcp.server.fastmcp import FastMCP
+from typing import Any, Optional
+
 from elasticsearch import AsyncElasticsearch
 from contextlib import asynccontextmanager
+
+from mcp.server.fastmcp import FastMCP
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize FastMCP server
 mcp = FastMCP("apple-watch-steps")
 
 # Constants
-ES_HOST = "http://localhost:9200"
+ES_ENDPOINT = os.environ.get("ES_ENDPOINT", "http://localhost:9200")
+ES_API_KEY = os.environ.get("ES_API_KEY")
 ES_INDEX = "apple-health-steps"
-
-# API key from environment variable or fallback for development
-ES_API_KEY = os.getenv('ES_API_KEY')
 
 
 # Pydantic model for parameter validation
@@ -52,7 +57,7 @@ class QueryStepDataParams(BaseModel):
 @asynccontextmanager
 async def get_es_client():
     """Context manager for Elasticsearch client."""
-    client = AsyncElasticsearch([ES_HOST], api_key=ES_API_KEY)
+    client = AsyncElasticsearch([ES_ENDPOINT], api_key=ES_API_KEY)
     try:
         yield client
     finally:
@@ -162,118 +167,43 @@ async def get_steps_summary() -> str:
 async def query_step_data(params: QueryStepDataParams) -> str:
     """
     Query step data with customizable parameters
-    
+
+
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         aggregation: Aggregation interval (hourly, daily, weekly, monthly)
         device: Filter by specific device name
     """
-    # Extract parameters from model
+    # Extract parameters
     start_date = params.start_date or ""
     end_date = params.end_date or ""
     aggregation = params.aggregation or ""
     device = params.device or ""
-    
-    query = {"query": {"match_all": {}}}
-    filters = []
-    
-    # Date filters
-    date_ranges = []
-    if start_date:
-        date_ranges.append({"gte": start_date})
-    if end_date:
-        date_ranges.append({"lte": end_date})
-    
-    if date_ranges:
-        filters.append({
-            "range": {
-                "day": {**{k: v for d in date_ranges for k, v in d.items()}}
-            }
-        })
-    
-    # Device filter
-    if device:
-        filters.append({
-            "wildcard": {
-                "device": f"*{device}*"
-            }
-        })
-    
-    if filters:
-        query["query"] = {"bool": {"must": filters}}
-    
-    # Aggregation handling
-    if aggregation:
-        interval_mapping = {
-            "hourly": "1h",
-            "daily": "1d", 
-            "weekly": "1w",
-            "monthly": "1M"
-        }
-        interval = interval_mapping.get(aggregation, "1d")
-        date_field = "startDate" if aggregation == "hourly" else "day"
-        
-        query["aggs"] = {
-            "time_series": {
-                "date_histogram": {
-                    "field": date_field,
-                    "calendar_interval": interval,
-                    "min_doc_count": 0
-                },
-                "aggs": {
-                    "total_steps": {"sum": {"field": "value"}},
-                    "avg_steps": {"avg": {"field": "value"}},
-                    "max_steps": {"max": {"field": "value"}},
-                    "min_steps": {"min": {"field": "value"}}
-                }
-            }
-        }
-        query["size"] = 0
-    else:
-        query.update({
-            "sort": [{"startDate": "desc"}],
-            "size": 10
-        })
-    
+
+
+    # Build and execute query
+    query = build_elasticsearch_query(start_date, end_date, device, aggregation)
+   
     data = await query_elasticsearch(query)
     if not data:
-        return json.dumps({
-            "error": "Unable to query Elasticsearch",
-            "query": query
-        }, indent=2)
-    
-    # Process results
-    results = []
-    if aggregation and "time_series" in data.get("aggregations", {}):
-        for bucket in data["aggregations"]["time_series"]["buckets"]:
-            results.append({
-                "date": bucket["key_as_string"],
-                "total_steps": bucket["total_steps"]["value"],
-                "average_steps": bucket["avg_steps"]["value"],
-                "max_steps": bucket["max_steps"]["value"],
-                "min_steps": bucket["min_steps"]["value"],
-                "records": bucket["doc_count"]
-            })
+        return json.dumps(
+            {"error": "Unable to query Elasticsearch", "query": query}, indent=2
+        )
+
+
+    # Process results based on aggregation type
+    if aggregation:
+        results = process_aggregated_results(data)
     else:
-        for hit in data["hits"]["hits"]:
-            source = hit["_source"]
-            results.append({
-                "startDate": source.get("startDate"),
-                "endDate": source.get("endDate"),
-                "day": source.get("day"),
-                "dayOfWeek": source.get("dayOfWeek"),
-                "hour": source.get("hour"),
-                "value": source.get("value"),
-                "device": source.get("device"),
-                "sourceName": source.get("sourceName")
-            })
-    
+        results = process_raw_results(data)
+
+
     return json.dumps({
         "aggregation": aggregation,
         "total_records": data["hits"]["total"]["value"],
         "data": results,
-        "query": query
+        "query": query,
     }, indent=2)
 
 @mcp.tool()
