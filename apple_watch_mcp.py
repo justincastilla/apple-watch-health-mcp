@@ -16,6 +16,12 @@ from typing import Any, Optional
 from elasticsearch import AsyncElasticsearch
 from contextlib import asynccontextmanager
 
+from utilities import (
+    build_elasticsearch_query,
+    process_aggregated_results,
+    process_raw_results,
+)
+
 from mcp.server.fastmcp import FastMCP
 
 # Load environment variables from .env file
@@ -36,8 +42,8 @@ class QueryStepDataParams(BaseModel):
     end_date: Optional[str] = None
     aggregation: Optional[str] = None
     device: Optional[str] = None
-    
-    @field_validator('start_date', 'end_date')
+
+    @field_validator("start_date", "end_date")
     def validate_date_format(cls, value):
         if value is None:
             return value
@@ -46,13 +52,16 @@ class QueryStepDataParams(BaseModel):
             return value
         except ValueError:
             raise ValueError("Invalid date format. Use YYYY-MM-DD")
-    
-    @field_validator('aggregation')
+
+    @field_validator("aggregation")
     def validate_aggregation(cls, value):
         valid_aggregations = ["hourly", "daily", "weekly", "monthly", None]
         if value not in valid_aggregations:
-            raise ValueError(f"Invalid aggregation. Use one of: {valid_aggregations[:-1]}")
+            raise ValueError(
+                f"Invalid aggregation. Use one of: {valid_aggregations[:-1]}"
+            )
         return value
+
 
 @asynccontextmanager
 async def get_es_client():
@@ -63,18 +72,16 @@ async def get_es_client():
     finally:
         await client.close()
 
+
 # Elasticsearch helper function
 async def query_elasticsearch(query: dict) -> dict[str, Any] | None:
     """Makes a request to Elasticsearch with proper error handling."""
     print(f"Sending query to Elasticsearch: {json.dumps(query)}")
-    
+
     # Use context manager
     async with get_es_client() as client:
         try:
-            response = await client.search(
-                index=ES_INDEX,
-                body=query
-            )
+            response = await client.search(index=ES_INDEX, body=query)
             return response
         except Exception as e:
             print(f"Error querying Elasticsearch: {e}")
@@ -87,80 +94,64 @@ async def list_step_types() -> str:
     """List all available step types in the database"""
     query = {
         "size": 0,
-        "aggs": {
-            "step_types": {
-                "terms": {
-                    "field": "type",
-                    "size": 100
-                }
-            }
-        }
+        "aggs": {"step_types": {"terms": {"field": "type", "size": 100}}},
     }
-    
+
     data = await query_elasticsearch(query)
     if not data:
         return json.dumps({"error": "Unable to query Elasticsearch"}, indent=2)
-    
-    step_types = [bucket["key"] for bucket in data["aggregations"]["step_types"]["buckets"]]
-    
-    return json.dumps({
-        "available_types": step_types,
-        "count": len(step_types)
-    }, indent=2)
+
+    step_types = [
+        bucket["key"] for bucket in data["aggregations"]["step_types"]["buckets"]
+    ]
+
+    return json.dumps(
+        {"available_types": step_types, "count": len(step_types)}, indent=2
+    )
+
 
 @mcp.resource("health://steps/latest")
 async def get_latest_steps() -> str:
     """Gets the most recent step records"""
     query = {
-        "query": {
-            "match_all": {}
-        },
-        "sort": [
-            {"endDate": {"order": "desc"}}
-        ],
-        "size": 10
+        "query": {"match_all": {}},
+        "sort": [{"endDate": {"order": "desc"}}],
+        "size": 10,
     }
-    
+
     data = await query_elasticsearch(query)
     if not data:
         return json.dumps({"error": "Unable to query Elasticsearch"}, indent=2)
-    
+
     results = []
     for hit in data["hits"]["hits"]:
         source = hit["_source"]
-        results.append({
-            "startDate": source.get("startDate"),
-            "endDate": source.get("endDate"),
-            "value": source.get("value"),
-            "device": source.get("device"),
-            "sourceName": source.get("sourceName"),
-            "dayOfWeek": source.get("dayOfWeek"),
-            "hour": source.get("hour")
-        })
-    
-    return json.dumps({
-        "latest_steps": results
-    }, indent=2)
+        results.append(
+            {
+                "startDate": source.get("startDate"),
+                "endDate": source.get("endDate"),
+                "value": source.get("value"),
+                "device": source.get("device"),
+                "sourceName": source.get("sourceName"),
+                "dayOfWeek": source.get("dayOfWeek"),
+                "hour": source.get("hour"),
+            }
+        )
+
+    return json.dumps({"latest_steps": results}, indent=2)
+
 
 @mcp.resource("health://steps/summary")
 async def get_steps_summary() -> str:
     """Get summary statistics for step counts"""
-    query = {
-        "aggs": {
-            "all_time": {
-                "stats": {
-                    "field": "value"
-                }
-            }
-        },
-        "size": 0
-    }
-    
+    query = {"aggs": {"all_time": {"stats": {"field": "value"}}}, "size": 0}
+
     data = await query_elasticsearch(query)
     if not data:
         return json.dumps({"error": "Unable to query Elasticsearch"}, indent=2)
-    
+
     return json.dumps(data["aggregations"], indent=2)
+
 
 # Tools
 @mcp.tool()
@@ -181,16 +172,14 @@ async def query_step_data(params: QueryStepDataParams) -> str:
     aggregation = params.aggregation or ""
     device = params.device or ""
 
-
     # Build and execute query
     query = build_elasticsearch_query(start_date, end_date, device, aggregation)
-   
+
     data = await query_elasticsearch(query)
     if not data:
         return json.dumps(
             {"error": "Unable to query Elasticsearch", "query": query}, indent=2
         )
-
 
     # Process results based on aggregation type
     if aggregation:
@@ -198,42 +187,41 @@ async def query_step_data(params: QueryStepDataParams) -> str:
     else:
         results = process_raw_results(data)
 
+    return json.dumps(
+        {
+            "aggregation": aggregation,
+            "total_records": data["hits"]["total"]["value"],
+            "data": results,
+            "query": query,
+        },
+        indent=2,
+    )
 
-    return json.dumps({
-        "aggregation": aggregation,
-        "total_records": data["hits"]["total"]["value"],
-        "data": results,
-        "query": query,
-    }, indent=2)
 
 @mcp.tool()
 async def get_all_steps() -> str:
     """Get all steps without any filtering"""
-    query = {
-        "query": {
-            "match_all": {}
-        },
-        "size": 10,
-        "sort": [{"startDate": "desc"}]
-    }
-    
+    query = {"query": {"match_all": {}}, "size": 10, "sort": [{"startDate": "desc"}]}
+
     data = await query_elasticsearch(query)
     if not data:
         return json.dumps({"error": "Unable to query Elasticsearch"}, indent=2)
-    
+
     results = []
     for hit in data["hits"]["hits"]:
         source = hit["_source"]
-        results.append({
-            "startDate": source.get("startDate"),
-            "value": source.get("value"),
-            "device": source.get("device")
-        })
-    
-    return json.dumps({
-        "total_records": data["hits"]["total"]["value"],
-        "data": results
-    })
+        results.append(
+            {
+                "startDate": source.get("startDate"),
+                "value": source.get("value"),
+                "device": source.get("device"),
+            }
+        )
+
+    return json.dumps(
+        {"total_records": data["hits"]["total"]["value"], "data": results}
+    )
+
 
 # Prompts
 @mcp.prompt()
@@ -254,6 +242,7 @@ def daily_report(date: str = None) -> str:
 4. Comparison with weekly average
 5. Graphical visualization of the data, if possible"""
 
+
 @mcp.prompt()
 def trend_analysis(start_date: str, end_date: str) -> str:
     """Analyze step trends over a specific period"""
@@ -265,6 +254,7 @@ Please include:
 4. Progression over time
 5. Recommendations based on the data"""
 
+
 @mcp.prompt()
 def device_comparison() -> str:
     """Compare step data recorded by different devices"""
@@ -274,6 +264,7 @@ def device_comparison() -> str:
 3. Times when each device is used more
 4. Apparent accuracy of each device
 5. Recommendations on which device to prioritize for tracking"""
+
 
 # Main function to run the server
 if __name__ == "__main__":
