@@ -5,14 +5,19 @@ import json
 from elasticsearch import Elasticsearch, helpers
 import os
 
+from dotenv import load_dotenv
 
-# --- Configuration ---
-ES_HOST = "http://localhost:9200"
+# Load environment variables from .env file
+load_dotenv()
+
+# Constants
+ES_ENDPOINT = os.environ.get("ES_ENDPOINT", "http://localhost:9200")
+ES_API_KEY = os.environ.get("ES_API_KEY")
 ES_INDEX = "apple-health-steps"
 DATA_FILE_PATH = "sample_data.json"
 
 # API key from environment variable or fallback for development
-ES_API_KEY = os.getenv('ES_API_KEY')
+ES_API_KEY = os.getenv("ES_API_KEY")
 
 
 # --- Index Mapping ---
@@ -28,48 +33,37 @@ INDEX_MAPPING = {
                     "manufacturer": {"type": "keyword"},
                     "model": {"type": "keyword"},
                     "hardware": {"type": "keyword"},
-                    "software": {"type": "keyword"}
+                    "software": {"type": "keyword"},
                 }
             },
             "unit": {"type": "keyword"},
             "creationDate": {
                 "type": "date",
-                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis",
             },
             "startDate": {
                 "type": "date",
-                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis",
             },
             "endDate": {
                 "type": "date",
-                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis",
             },
             "value": {"type": "float"},
-            "day": {
-                "type": "date",
-                "format": "yyyy-MM-dd"
-            },
+            "day": {"type": "date", "format": "yyyy-MM-dd"},
             "dayOfWeek": {"type": "keyword"},
             "hour": {"type": "integer"},
-            "duration": {"type": "float"}
+            "duration": {"type": "float"},
         }
     },
-    "settings": {
-        "number_of_shards": 1,  # WARNING: For production, consider using more shards based on your data volume
-        "number_of_replicas": 0  # WARNING: This is set to 0 for development. For production, use at least 1 replica for fault tolerance
-        
-    }
 }
 
 
 def create_es_client():
     """Creates and returns an Elasticsearch client."""
-    print(f"Connecting to Elasticsearch at {ES_HOST}...")
+    print(f"Connecting to Elasticsearch at {ES_ENDPOINT}...")
     try:
-        client = Elasticsearch(
-            hosts=[ES_HOST],
-            api_key=ES_API_KEY
-        )
+        client = Elasticsearch(hosts=[ES_ENDPOINT], api_key=ES_API_KEY)
         if not client.ping():
             raise ConnectionError("Could not connect to Elasticsearch.")
         print("Connection successful!")
@@ -78,17 +72,16 @@ def create_es_client():
         print(f"Connection error: {e}")
         return None
 
+
 def generate_actions(filepath, index_name):
     """
     Reads a JSON array from a file and yields a generator of actions for the bulk API.
     """
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)  # Load the entire JSON array
     for doc in data:
-        yield {
-            "_index": index_name,
-            "_source": doc
-        }
+        yield {"_index": index_name, "_source": doc}
+
 
 def ingest_data(client: Elasticsearch):
     """
@@ -110,7 +103,7 @@ def ingest_data(client: Elasticsearch):
     try:
         # Use the generator to prepare actions for the bulk helper
         actions = generate_actions(DATA_FILE_PATH, ES_INDEX)
-        
+
         # Ingest the data using the bulk helper
         success, failed = helpers.bulk(client, actions)
         print(f"Ingestion complete. Documents successfully ingested: {success}")
@@ -123,10 +116,10 @@ def ingest_data(client: Elasticsearch):
     except Exception as e:
         print(f"An error occurred during file reading or ingestion: {e}")
         return
-    
+
     # 4. Refresh and print the final document count.
     client.indices.refresh(index=ES_INDEX)
-    count = client.count(index=ES_INDEX)['count']
+    count = client.count(index=ES_INDEX)["count"]
     print(f"Final check: The index '{ES_INDEX}' now contains {count} documents.")
 
 
