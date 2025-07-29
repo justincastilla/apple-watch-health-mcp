@@ -49,7 +49,7 @@ source .venv/bin/activate
 
 Install the necessary Python packages. Note that we are specifying a compatible version for the `elasticsearch` library to match the v8.x server used in this tutorial.
 ```shell
-uv add "mcp[cli]" "elasticsearch>=8.0.0,<9.0.0" aiohttp pydantic
+uv add "mcp[cli]" "elasticsearch>=8.0.0,<9.0.0" aiohttp pydantic dotenv-python
 
 ```
 
