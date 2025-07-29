@@ -55,14 +55,19 @@ uv add "mcp[cli]" "elasticsearch>=8.0.0,<9.0.0" aiohttp pydantic
 
 ## Environment Configuration
 
-### Setting up the API Key
+### Creating the `.env` file
+This demo uses the `dotenv` environment variable library which sets local environment variables instead of requiring global scope. 
 
-After creating the API key in Elasticsearch, you need to configure it in your environment:
-
+1. Duplicate the `.env.example` file and rename the new file to `.env`. 
 ```bash
-# Export the API key for the current session
-export ES_API_KEY="your_encoded_api_key_here"
+cp .env.example .env
 ```
+
+2. Set the `ES_ENDPOINT` url if you are using a cloud instance of Elasticsearch. If you are using a local instance of Elasticsearch, leave it blank.
+3. Set the `ES_API_KEY` string. Instructions on creating an API key may be found [here](https://www.elastic.co/docs/deploy-manage/api-keys/elasticsearch-api-keys#create-api-key).
+4. Save the file.
+
+When the demo files are ran, the `dotenv` library will automatically pull these environment variables into the code.
 
 ## Usage Instructions
 
@@ -137,6 +142,7 @@ You should see a structure similar to this inside the file, under the "mcpServer
 ## File Descriptions
 
 * `apple_watch_mcp.py`: The **complete and final script** for the MCP server, containing all implemented Resources, Tools, and Prompts.
+* `utilities.py`: Helper methods used in the `apple_watch_mcp.py` tool functions for clarity and conciseness.
 * `ingest_data.py`: A helper script that populates your Elasticsearch instance with the sample data.
 * `sample_data.json`: A JSON file containing fictitious Apple Health step count data for testing.
 * `README.md`: This file, providing instructions to run the complete solution.
