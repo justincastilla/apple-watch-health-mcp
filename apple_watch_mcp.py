@@ -10,7 +10,7 @@ import json
 from dotenv import load_dotenv
 
 from datetime import datetime
-from pydantic import BaseModel, field_validator, ValidationError
+from pydantic import BaseModel, field_validator
 from typing import Any, Optional
 
 from elasticsearch import AsyncElasticsearch
