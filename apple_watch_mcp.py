@@ -224,23 +224,20 @@ async def get_all_steps() -> str:
 
 
 # Prompts
-@mcp.prompt()
+@mcp.prompt("/daily_report")
 def daily_report(date: str = None) -> str:
     """Create a daily step report for a specific date"""
-    if date:
-        return f"""Please analyze the step data for {date}. Provide:
-1. Total steps
-2. Average steps per active hour
-3. Most active periods of the day
-4. Comparison with weekly average
-5. Graphical visualization of the data, if possible"""
-    else:
-        return """Please analyze the step data for today. Provide:
-1. Total steps so far
-2. Average steps per active hour
-3. Most active periods of the day
-4. Comparison with weekly average
-5. Graphical visualization of the data, if possible"""
+    date_display = date or "today"
+    steps_qualifier = "so far" if not date else ""
+
+    return f"""Please analyze the step data for {date_display}. 
+                Provide:
+                1. Total steps{' ' + steps_qualifier if steps_qualifier else ''}
+                2. Average steps per active hour
+                3. Most active periods of the day
+                4. Comparison with weekly average
+                5. Graphical visualization of the 
+                data, if possible"""
 
 
 @mcp.prompt()
